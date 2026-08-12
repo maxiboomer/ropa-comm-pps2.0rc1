@@ -25,6 +25,7 @@ from modelo_ppsi import (
     lista_para_texto, dict_tipos_para_texto, dict_estimativa_para_texto,
     calcular_risco, SITUACOES_RIPD, PRINCIPIOS_LGPD, DIREITOS_TITULARES,
     CRITERIO_GERAL_LABELS, CRITERIO_ESPECIFICO_LABELS,
+    CATEGORIAS_TITULARES_SUGERIDAS,
     # Porte do repo `ropa` — matriz 5×5, gatilhos, sugestões, aprovações
     nivel_risco, consolidar_risco, NIVEL_LABEL, NIVEL_COR, PROB_LABELS, IMPACTO_LABELS,
     CATEGORIAS_RISCO, RISCOS_TIPICOS_POR_FATOR, SALVAGUARDAS_TIPICAS, TIPO_SALVAGUARDA_LABEL,
@@ -276,6 +277,7 @@ app.jinja_env.globals.update(
     CAMPOS_VALIDACAO=CAMPOS_VALIDACAO,
     SITUACOES=SITUACOES,
     CATEGORIAS_DADOS_FCI=CATEGORIAS_DADOS_FCI,
+    CATEGORIAS_TITULARES_SUGERIDAS=CATEGORIAS_TITULARES_SUGERIDAS,
     ORGANIZACAO=ORGANIZACAO,
     UNIDADE=UNIDADE,
     ENCARREGADO=ENCARREGADO,
@@ -501,7 +503,8 @@ def nova():
                               _snapshot_json(dados), _responsavel_atual())
         flash(f"Atividade #{novo_id} criada com sucesso (versão 1.0).", "success")
         return redirect(url_for("ver", atividade_id=novo_id))
-    return render_template("form.html", atividade=None, titulo="Nova Atividade")
+    return render_template("form.html", atividade=None, titulo="Nova Atividade",
+                           medidas_outras="")
 
 
 @app.route("/atividades/<int:atividade_id>")
@@ -587,10 +590,14 @@ def editar(atividade_id):
         flash(f"Atividade #{atividade_id} atualizada (versão {nova_versao}).", "success")
         return redirect(url_for("ver", atividade_id=atividade_id))
 
+    cat_descricoes = {s["descricao"] for s in SALVAGUARDAS_TIPICAS}
+    medidas_atuais = (atividade.get("medidas_seguranca") or "").split("\n")
+    medidas_outras = "\n".join(m for m in medidas_atuais if m and m not in cat_descricoes)
     return render_template(
         "form.html",
         atividade=atividade,
         titulo=f"Editar Atividade #{atividade_id}",
+        medidas_outras=medidas_outras,
     )
 
 
@@ -1572,6 +1579,17 @@ def seed():
 
 # ── Helper ────────────────────────────────────────────────────────────────────
 
+def _medidas_seguranca_from_form(form) -> str:
+    """Coleta medidas de segurança de checkboxes (catálogo SALVAGUARDAS_TIPICAS)
+    + campo de 'outras'. Preserva ordem do catálogo; junta em texto (Art. 46)."""
+    selecionadas = form.getlist("medidas_seguranca")
+    outras = (form.get("medidas_seguranca_outras", "") or "").strip()
+    linhas = [s for s in selecionadas if s and s.strip()]
+    if outras:
+        linhas.append(outras)
+    return "\n".join(linhas)
+
+
 def _form_to_dict(form) -> dict:
     def _j_lista(texto):
         return json.dumps(parse_lista(texto), ensure_ascii=False)
@@ -1597,7 +1615,7 @@ def _form_to_dict(form) -> dict:
         destinatarios=form.get("destinatarios", "").strip(),
         transferencia_inter=form.get("transferencia_inter", "N/A").strip(),
         prazo_retencao=form.get("prazo_retencao", "").strip(),
-        medidas_seguranca=form.get("medidas_seguranca", "").strip(),
+        medidas_seguranca=_medidas_seguranca_from_form(form),
         unidade_controladora=form.get("unidade_controladora", "").strip(),
         sistema_sei=form.get("sistema_sei", "").strip(),
         observacoes=form.get("observacoes", "").strip(),

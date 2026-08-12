@@ -67,10 +67,27 @@
         <div class="form-card">
           <h6><i class="bi bi-person-vcard"></i> Dados Pessoais Tratados <span class="text-muted" style="text-transform:none;letter-spacing:0;font-weight:400;">(4.2)</span></h6>
           <div class="mb-3"><label class="form-label">Categorias de Titulares</label>
-            <input type="text" name="categorias_titulares" class="form-control form-control-sm" value="{{ atividade.categorias_titulares if atividade else '' }}" placeholder="Ex: servidores, cidadãos, candidatos, visitantes"></div>
+            <input type="text" name="categorias_titulares" class="form-control form-control-sm" list="listaCatTitulares" value="{{ atividade.categorias_titulares if atividade else '' }}" placeholder="Ex: servidores, cidadãos, candidatos, visitantes">
+            <datalist id="listaCatTitulares">
+              {% for c in CATEGORIAS_TITULARES_SUGERIDAS %}<option value="{{ c }}"></option>{% endfor %}
+            </datalist>
+            <div class="form-text">Separe por vírgula. Sugestões conforme Guia 4.2.2 — pode digitar livremente.</div></div>
           <div class="mb-3"><label class="form-label">Estimativa de Titulares por Categoria</label>
-            <textarea name="titulares_estimativa" id="titulares_estimativa" class="form-control form-control-sm" rows="2" placeholder="Formato 'categoria: quantidade' por linha (ex: servidores: 2500)">{{ dict_estimativa_para_texto(atividade.titulares_estimativa) if atividade else '' }}</textarea>
-            <div class="form-text">Digite uma categoria por linha, no formato <code>categoria: quantidade</code>.</div></div>
+            {% set _est = parse_json(atividade.titulares_estimativa) if atividade and atividade.titulares_estimativa else {} %}
+            <div id="estPares">
+              {% if _est and _est is mapping %}
+                {% for cat, qtd in _est.items() %}
+                <div class="est-par d-flex gap-2 mb-1">
+                  <input type="text" class="form-control form-control-sm est-cat" value="{{ cat }}" placeholder="Categoria">
+                  <input type="text" class="form-control form-control-sm est-qtd" style="max-width:160px;" value="{{ qtd }}" placeholder="Quantidade">
+                  <button type="button" class="btn btn-sm btn-outline-secondary est-del"><i class="bi bi-x"></i></button>
+                </div>
+                {% endfor %}
+              {% endif %}
+            </div>
+            <button type="button" class="btn btn-sm btn-tre-soft mb-1" id="estAdd"><i class="bi bi-plus-lg"></i> Adicionar categoria</button>
+            <textarea name="titulares_estimativa" id="titulares_estimativa" class="form-control form-control-sm d-none" rows="2">{{ dict_estimativa_para_texto(atividade.titulares_estimativa) if atividade else '' }}</textarea>
+            <div class="form-text">Informe a categoria e a quantidade estimada de titulares. Formatado automaticamente.</div></div>
           <div class="mb-3"><label class="form-label">Titulares com Proteção Reforçada</label>
             <div class="d-flex flex-wrap gap-3">
               {% for cat in ['criancas','adolescentes','idosos','outros vulneráveis'] %}
@@ -162,7 +179,23 @@
         <div class="form-card">
           <h6><i class="bi bi-lock"></i> Segurança <span class="text-muted" style="text-transform:none;letter-spacing:0;font-weight:400;">(Art. 46 LGPD)</span></h6>
           <div class="mb-3"><label class="form-label">Medidas de Segurança <small>(Art. 46)</small></label>
-            <textarea name="medidas_seguranca" class="form-control form-control-sm" rows="3" placeholder="Controle de acesso, criptografia, logs de auditoria...">{{ atividade.medidas_seguranca if atividade else '' }}</textarea></div>
+            {% set _seg = atividade.medidas_seguranca.split('\n') if atividade and atividade.medidas_seguranca else [] %}
+            {% for tipo, rotulo in [('tecnica','Técnicas'),('organizacional','Organizacionais'),('juridica','Jurídicas')] %}
+            <div class="mb-2">
+              <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:700;margin-bottom:.25rem;">{{ rotulo }}</div>
+              <div class="d-flex flex-wrap gap-2">
+                {% for s in SALVAGUARDAS_TIPICAS if s.tipo == tipo %}
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" name="medidas_seguranca" value="{{ s.descricao }}" id="seg_{{ loop.index }}_{{ tipo }}" {% if s.descricao in _seg %}checked{% endif %}>
+                  <label class="form-check-label" for="seg_{{ loop.index }}_{{ tipo }}" style="font-size:.8rem;">{{ s.descricao }}</label>
+                </div>
+                {% endfor %}
+              </div>
+            </div>
+            {% endfor %}
+            <label class="form-label" style="font-size:.8rem;">Outras medidas (não listadas)</label>
+            <textarea name="medidas_seguranca_outras" class="form-control form-control-sm" rows="2" placeholder="Outras medidas adotadas...">{{ medidas_outras if medidas_outras is defined else '' }}</textarea>
+            <div class="form-text">Selecione do catálogo de salvaguardas típicas (técnica, organizacional, jurídica) e/ou adicione medidas próprias.</div></div>
           <div class="mb-0"><label class="form-label">Observações</label>
             <textarea name="observacoes" class="form-control form-control-sm" rows="2" placeholder="Informações adicionais relevantes...">{{ atividade.observacoes if atividade else '' }}</textarea></div>
         </div>
@@ -251,6 +284,40 @@
     ta.value = ta.value ? ta.value+'\n'+line : line;
     ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length);
   }
+
+  // Estimativa de titulares — pares (categoria + quantidade)
+  (function(){
+    const wrap=document.getElementById('estPares'); if(!wrap) return;
+    const hidden=document.getElementById('titulares_estimativa');
+    function syncEst(){
+      const linhas=[];
+      wrap.querySelectorAll('.est-par').forEach(p=>{
+        const cat=(p.querySelector('.est-cat').value||'').trim();
+        const qtd=(p.querySelector('.est-qtd').value||'').trim();
+        if(cat) linhas.push(cat+': '+(qtd||'0'));
+      });
+      hidden.value=linhas.join('\n');
+    }
+    function addPar(cat,qtd){
+      const d=document.createElement('div'); d.className='est-par d-flex gap-2 mb-1';
+      d.innerHTML='<input type="text" class="form-control form-control-sm est-cat" placeholder="Categoria">'
+        +'<input type="text" class="form-control form-control-sm est-qtd" style="max-width:160px;" placeholder="Quantidade">'
+        +'<button type="button" class="btn btn-sm btn-outline-secondary est-del"><i class="bi bi-x"></i></button>';
+      wrap.appendChild(d);
+      d.querySelector('.est-cat').value=cat||'';
+      d.querySelector('.est-qtd').value=qtd||'';
+      d.querySelector('.est-del').onclick=()=>{ d.remove(); syncEst(); };
+      ['est-cat','est-qtd'].forEach(cls=>d.querySelector('.'+cls).addEventListener('input',syncEst));
+      syncEst();
+    }
+    document.getElementById('estAdd').onclick=()=>addPar();
+    wrap.querySelectorAll('.est-par').forEach(p=>{
+      p.querySelector('.est-del').onclick=()=>{ p.remove(); syncEst(); };
+      ['est-cat','est-qtd'].forEach(cls=>p.querySelector('.'+cls).addEventListener('input',syncEst));
+    });
+    syncEst();
+  })();
+
   show(0);
 </script>
 {% endblock %}

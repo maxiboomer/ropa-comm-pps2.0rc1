@@ -41,6 +41,24 @@ CATEGORIAS_PROTECAO_REFORCADA = [
     "outros vulneráveis",
 ]
 
+# ── Categorias de titulares sugeridas (Guia 4.2.2) — sugestão via datalist ──
+CATEGORIAS_TITULARES_SUGERIDAS = [
+    "Servidores públicos",
+    "Empregados públicos / celetistas",
+    "Estagiários e aprendizes",
+    "Cidadãos / cidadãs em geral",
+    "Usuários de serviços públicos",
+    "Fornecedores e prestadores de serviço",
+    "Candidatos a cargos públicos",
+    "Pensionistas e aposentados",
+    "Menores de idade",
+    "Idosos",
+    "Pessoas com deficiência",
+    "Visitantes",
+    "Terceirizados",
+]
+
+
 # ── Campos cujo valor é armazenado como JSON (multivalorado) ─────────────────
 JSON_FIELDS = {
     "titulares_estimativa",            # {categoria: quantidade}
