@@ -402,6 +402,23 @@ def migrar_schema(conn):
         criado_em     TEXT DEFAULT (datetime('now','localtime'))
     )""")
 
+    # ── Workflow de aprovação do RIPD em etapas (porte do repo `ropa`) ──
+    conn.execute("""
+    CREATE TABLE IF NOT EXISTS ripd_aprovacoes (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        ripd_id       INTEGER NOT NULL,
+        papel         TEXT NOT NULL,
+        aprovador_sub TEXT,
+        aprovador_nome TEXT,
+        status        TEXT NOT NULL DEFAULT 'pendente',
+        comentario    TEXT,
+        solicitado_em TEXT DEFAULT (datetime('now','localtime')),
+        respondido_em TEXT,
+        FOREIGN KEY (ripd_id) REFERENCES ripds(id) ON DELETE CASCADE
+    )""")
+    conn.execute("CREATE INDEX IF NOT EXISTS ix_ripd_aprov_ripd ON ripd_aprovacoes(ripd_id)")
+
+
     # Registros legados (pré-PPSI 2.0) passam a "concluído" / versão 1.0.
     conn.execute("UPDATE atividades SET situacao='concluido' WHERE situacao IS NULL OR situacao=''")
     conn.execute("UPDATE atividades SET versao='1.0' WHERE versao IS NULL OR versao=''")
@@ -437,4 +454,285 @@ def campos_estruturais() -> set:
     """Alterações nestes campos geram nova versão MAJOR."""
     return {"finalidade", "base_legal", "categorias_dados", "tipos_dados",
             "operadores", "controladores", "fluxo_tratamento", "prazo_retencao"}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Porte do módulo RIPD do repo `ropa` (ripd_module.py) — matriz 5×5 ISO 27005,
+# catálogo de riscos/salvaguardas típicos, gatilhos e sugestões.
+# Lógica pura (sem DB). Integrado aos campos JSON do modelo PPSI 2.0.
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Matriz 5×5 (ISO 27005): probabilidade × impacto → nível
+PROB_LABELS = {1: "Muito baixa", 2: "Baixa", 3: "Média", 4: "Alta", 5: "Muito alta"}
+IMPACTO_LABELS = {1: "Insignificante", 2: "Menor", 3: "Moderado", 4: "Maior", 5: "Catastrófico"}
+
+
+def risco_score(probabilidade, impacto) -> int:
+    p = max(1, min(5, int(probabilidade or 1)))
+    i = max(1, min(5, int(impacto or 1)))
+    return p * i
+
+
+def nivel_risco(probabilidade, impacto) -> str:
+    score = risco_score(probabilidade, impacto)
+    if score <= 4:
+        return "baixo"
+    if score <= 9:
+        return "moderado"
+    if score <= 15:
+        return "alto"
+    return "critico"
+
+
+NIVEL_LABEL = {"baixo": "Baixo", "moderado": "Moderado", "alto": "Alto", "critico": "Crítico"}
+NIVEL_COR = {"baixo": "#198754", "moderado": "#ffc107", "alto": "#fd7e14", "critico": "#dc3545"}
+NIVEL_ORDEM = {"baixo": 1, "moderado": 2, "alto": 3, "critico": 4}
+
+
+def consolidar_risco(niveis) -> str:
+    """Pior risco vence (risco residual consolidado)."""
+    if not niveis:
+        return "baixo"
+    return max(niveis, key=lambda n: NIVEL_ORDEM.get(n, 0))
+
+
+CATEGORIAS_RISCO = [
+    ("confidencialidade", "Confidencialidade"),
+    ("integridade", "Integridade"),
+    ("disponibilidade", "Disponibilidade"),
+    ("conformidade", "Conformidade legal"),
+]
+
+
+# Riscos típicos sugeridos a partir de fatores do RoPA (adaptado aos campos PPSI 2.0)
+RISCOS_TIPICOS_POR_FATOR: dict = {
+    "dados_sensiveis": [
+        {"categoria": "confidencialidade",
+         "ameaca": "Acesso indevido a dados pessoais sensíveis",
+         "vulnerabilidade": "Controles de acesso insuficientes a dados sensíveis",
+         "impacto_titular": "Discriminação, exposição de informações íntimas",
+         "probabilidade": 3, "impacto": 5},
+        {"categoria": "conformidade",
+         "ameaca": "Tratamento de dado sensível sem base legal específica do Art. 11",
+         "vulnerabilidade": "Documentação de base legal incompleta",
+         "impacto_titular": "Tratamento ilícito; sanções da ANPD",
+         "probabilidade": 2, "impacto": 4},
+    ],
+    "transferencia_internacional": [
+        {"categoria": "conformidade",
+         "ameaca": "Transferência internacional sem mecanismo válido (Art. 33)",
+         "vulnerabilidade": "Ausência de cláusulas contratuais ou decisão de adequação",
+         "impacto_titular": "Dados sob jurisdição com proteção inferior",
+         "probabilidade": 3, "impacto": 4},
+    ],
+    "decisao_automatizada": [
+        {"categoria": "conformidade",
+         "ameaca": "Decisão automatizada sem possibilidade de revisão (Art. 20)",
+         "vulnerabilidade": "Ausência de canal de revisão humana",
+         "impacto_titular": "Decisão injusta sem direito a contestação",
+         "probabilidade": 3, "impacto": 4},
+        {"categoria": "conformidade",
+         "ameaca": "Viés algorítmico discriminatório",
+         "vulnerabilidade": "Modelo não auditado quanto a viés",
+         "impacto_titular": "Discriminação ilícita",
+         "probabilidade": 2, "impacto": 4},
+    ],
+    "dados_criancas": [
+        {"categoria": "conformidade",
+         "ameaca": "Tratamento de dados de crianças sem consentimento parental (Art. 14)",
+         "vulnerabilidade": "Verificação de idade ausente ou frágil",
+         "impacto_titular": "Tratamento ilícito de dados de menores",
+         "probabilidade": 3, "impacto": 5},
+    ],
+    "alto_volume": [
+        {"categoria": "confidencialidade",
+         "ameaca": "Vazamento massivo de dados pessoais",
+         "vulnerabilidade": "Concentração de grande volume sem segregação",
+         "impacto_titular": "Exposição em larga escala",
+         "probabilidade": 2, "impacto": 5},
+    ],
+    "compartilhamento_amplo": [
+        {"categoria": "confidencialidade",
+         "ameaca": "Uso indevido por terceiro destinatário",
+         "vulnerabilidade": "Cláusulas de proteção de dados ausentes ou fracas",
+         "impacto_titular": "Uso fora da finalidade informada",
+         "probabilidade": 3, "impacto": 3},
+    ],
+    "retencao_longa": [
+        {"categoria": "conformidade",
+         "ameaca": "Retenção além do necessário (princípio da necessidade)",
+         "vulnerabilidade": "Política de descarte não automatizada",
+         "impacto_titular": "Permanência indevida dos dados",
+         "probabilidade": 4, "impacto": 2},
+    ],
+    "base_consentimento": [
+        {"categoria": "conformidade",
+         "ameaca": "Coleta sem consentimento livre, informado e inequívoco",
+         "vulnerabilidade": "Termos de consentimento genéricos ou agrupados",
+         "impacto_titular": "Tratamento sem base legal válida",
+         "probabilidade": 3, "impacto": 3},
+    ],
+    "base_legitimo_interesse": [
+        {"categoria": "conformidade",
+         "ameaca": "Falha no teste de balanceamento (legítimo interesse)",
+         "vulnerabilidade": "LIA não documentado",
+         "impacto_titular": "Sobreposição indevida sobre direitos do titular",
+         "probabilidade": 3, "impacto": 3},
+    ],
+    "default": [
+        {"categoria": "confidencialidade",
+         "ameaca": "Acesso não autorizado por usuário interno",
+         "vulnerabilidade": "Perfis de acesso amplos demais",
+         "impacto_titular": "Exposição não autorizada",
+         "probabilidade": 3, "impacto": 3},
+        {"categoria": "integridade",
+         "ameaca": "Alteração indevida de dados",
+         "vulnerabilidade": "Ausência de logs de alteração",
+         "impacto_titular": "Decisão baseada em dado incorreto",
+         "probabilidade": 2, "impacto": 3},
+        {"categoria": "disponibilidade",
+         "ameaca": "Indisponibilidade do sistema com perda de dados",
+         "vulnerabilidade": "Backup não testado",
+         "impacto_titular": "Impossibilidade de exercer direitos",
+         "probabilidade": 2, "impacto": 3},
+    ],
+}
+
+# Catálogo de salvaguardas típicas (técnica, organizacional, jurídica)
+SALVAGUARDAS_TIPICAS: list = [
+    {"tipo": "tecnica", "descricao": "Criptografia em repouso e em trânsito (TLS 1.2+)"},
+    {"tipo": "tecnica", "descricao": "Pseudonimização ou anonimização quando aplicável"},
+    {"tipo": "tecnica", "descricao": "Controle de acesso baseado em papéis (RBAC)"},
+    {"tipo": "tecnica", "descricao": "Trilha de auditoria de acesso e alterações"},
+    {"tipo": "tecnica", "descricao": "MFA para acessos privilegiados"},
+    {"tipo": "tecnica", "descricao": "Backup com testes periódicos de restauração"},
+    {"tipo": "tecnica", "descricao": "Mascaramento de dados em ambientes não produtivos"},
+    {"tipo": "organizacional", "descricao": "Política de privacidade publicada e atualizada"},
+    {"tipo": "organizacional", "descricao": "Treinamento periódico em LGPD para a equipe"},
+    {"tipo": "organizacional", "descricao": "Procedimento documentado de atendimento ao titular"},
+    {"tipo": "organizacional", "descricao": "Procedimento de notificação de incidentes (Art. 48)"},
+    {"tipo": "organizacional", "descricao": "Revisão periódica de perfis de acesso"},
+    {"tipo": "juridica", "descricao": "Cláusulas de proteção de dados em contratos com operadores"},
+    {"tipo": "juridica", "descricao": "Termo de confidencialidade assinado pela equipe"},
+    {"tipo": "juridica", "descricao": "Cláusulas contratuais padrão (SCC) para transferência internacional"},
+]
+
+TIPO_SALVAGUARDA_LABEL = {"tecnica": "Técnica", "organizacional": "Organizacional", "juridica": "Jurídica"}
+
+
+def _fatores_atividade(atividade) -> list:
+    """Mapeia atividade (campos PPSI 2.0) para chaves de RISCOS_TIPICOS_POR_FATOR."""
+    a = dict(atividade or {})
+    fatores = []
+    if a.get("dados_sensiveis"):
+        fatores.append("dados_sensiveis")
+    prot = parse_json(a.get("titulares_protecao_reforcada"))
+    if any(x in (prot or []) for x in ("criancas", "adolescentes")):
+        fatores.append("dados_criancas")
+    if a.get("decisoes_automatizadas"):
+        fatores.append("decisao_automatizada")
+    transf = parse_json(a.get("transferencia_internacional")) or []
+    if transf and not (len(transf) == 1 and str(transf[0]).upper() in ("N/A", "NAO", "NÃO", "NONE", "")):
+        fatores.append("transferencia_internacional")
+    try:
+        est = parse_json(a.get("titulares_estimativa"))
+        total = 0
+        if isinstance(est, dict):
+            for v in est.values():
+                total += int(str(v).replace(".", "").replace(",", "").strip() or 0)
+        elif est:
+            total = int(str(est).replace(".", "").replace(",", "").strip() or 0)
+        if total >= 10000:
+            fatores.append("alto_volume")
+    except Exception:
+        pass
+    base = (a.get("base_legal") or "").upper()
+    if base.startswith("IX"):
+        fatores.append("base_legitimo_interesse")
+    elif base.startswith(("I", "II", "III", "IV")):
+        fatores.append("base_consentimento")
+    comp = parse_json(a.get("compartilhamentos")) or []
+    if len(comp) >= 2:
+        fatores.append("compartilhamento_amplo")
+    prazo = (a.get("prazo_retencao") or "").lower()
+    if "ano" in prazo:
+        try:
+            anos = int("".join(ch for ch in prazo if ch.isdigit()) or "0")
+            if anos >= 5:
+                fatores.append("retencao_longa")
+        except ValueError:
+            pass
+    if not fatores:
+        fatores.append("default")
+    return fatores
+
+
+def gatilhos_ripd(atividade) -> list:
+    """Fatores que tornam o RIPD recomendável/obrigatório (sinalização ao usuário)."""
+    a = dict(atividade or {})
+    g = []
+    if a.get("dados_sensiveis"):
+        g.append("Tratamento envolve dados pessoais sensíveis (Art. 5º, II)")
+    prot = parse_json(a.get("titulares_protecao_reforcada"))
+    if any(x in (prot or []) for x in ("criancas", "adolescentes")):
+        g.append("Tratamento envolve dados de crianças e adolescentes (Art. 14)")
+    if a.get("decisoes_automatizadas"):
+        g.append("Decisões automatizadas que afetem o titular (Art. 20)")
+    base = (a.get("base_legal") or "").upper()
+    if base.startswith("IX"):
+        g.append("Base de legítimo interesse (Art. 7º, IX) — ANPD pode exigir RIPD")
+    transf = parse_json(a.get("transferencia_internacional")) or []
+    if transf and not (len(transf) == 1 and str(transf[0]).upper() in ("N/A", "NAO", "NÃO", "NONE", "")):
+        g.append("Transferência internacional de dados (Art. 33)")
+    try:
+        est = parse_json(a.get("titulares_estimativa"))
+        total = 0
+        if isinstance(est, dict):
+            for v in est.values():
+                total += int(str(v).replace(".", "").replace(",", "").strip() or 0)
+        elif est:
+            total = int(str(est).replace(".", "").replace(",", "").strip() or 0)
+        if total >= 10000:
+            g.append(f"Alto volume de titulares (~{total:,})".replace(",", "."))
+    except Exception:
+        pass
+    return g
+
+
+def sugerir_riscos(atividade) -> list:
+    """Riscos típicos sugeridos a partir dos fatores da atividade, com nível inerente."""
+    sugestoes = []
+    seen = set()
+    for fator in _fatores_atividade(atividade):
+        for r in RISCOS_TIPICOS_POR_FATOR.get(fator, []):
+            key = (r["categoria"], r["ameaca"])
+            if key in seen:
+                continue
+            seen.add(key)
+            risco = dict(r)
+            risco["nivel_inerente"] = nivel_risco(risco["probabilidade"], risco["impacto"])
+            sugestoes.append(risco)
+    if len(sugestoes) < 3:
+        for r in RISCOS_TIPICOS_POR_FATOR["default"]:
+            key = (r["categoria"], r["ameaca"])
+            if key not in seen:
+                seen.add(key)
+                risco = dict(r)
+                risco["nivel_inerente"] = nivel_risco(risco["probabilidade"], risco["impacto"])
+                sugestoes.append(risco)
+    return sugestoes
+
+
+# Papéis para o workflow de aprovação do RIPD
+PAPEIS_APROVACAO = [
+    ("dpo", "DPO / Encarregado"),
+    ("gestor_unidade", "Gestor da Unidade"),
+    ("aprovador", "Aprovador formal"),
+    ("compliance", "Compliance / Jurídico"),
+]
+
+
+def papel_label(papel) -> str:
+    return dict(PAPEIS_APROVACAO).get(papel, papel)
+
 

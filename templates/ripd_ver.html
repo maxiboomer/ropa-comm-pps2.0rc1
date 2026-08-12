@@ -81,15 +81,36 @@
       {% endfor %}
       {% if not _dir %}{{ row("Direitos", "Não preenchido") }}{% endif %}
 
-      <h6 class="sec-tit">5. Gestão de riscos</h6>
+      <h6 class="sec-tit">5. Gestão de riscos (matriz 5×5 — ISO 27005)</h6>
       {% set _riscos = parse_json(ripd.riscos) %}
-      {% if _riscos %}
+      {% if _riscos and _riscos is not string %}
         {% for r in _riscos %}
-          {{ row("Risco " ~ loop.index, r.descricao ~ " · Impacto: " ~ r.impacto ~ " · Probab.: " ~ r.probabilidade ~ " · Aceite: " ~ r.aceite) }}
+          {% set _prob = r.probabilidade|int if r.probabilidade else 1 %}
+          {% set _imp = r.impacto|int if r.impacto else 1 %}
+          {% set _nivel = nivel_risco(_prob, _imp) if nivel_risco is defined else '' %}
+          <div class="detail-row">
+            <span class="detail-label">Risco {{ loop.index }} <span style="color:#aaa;font-weight:400;">({{ CATEGORIAS_RISCO|selectattr('0','equalto',r.categoria)|map(attribute='1')|first if CATEGORIAS_RISCO is defined else r.categoria }})</span></span>
+            <span class="detail-value">
+              {{ r.descricao }}
+              <span class="badge" style="background:{{ (NIVEL_COR.get(_nivel) if NIVEL_COR is defined else '') or '#6c757d' }};color:#fff;font-size:0.68rem;">
+                {{ (NIVEL_LABEL.get(_nivel) if NIVEL_LABEL is defined else _nivel) or _nivel }}
+              </span>
+              <div style="font-size:0.72rem;color:#888;margin-top:0.15rem;">
+                Probabilidade: {{ PROB_LABELS.get(_prob, _prob) if PROB_LABELS is defined else _prob }} · Impacto: {{ IMPACTO_LABELS.get(_imp, _imp) if IMPACTO_LABELS is defined else _imp }} · Aceite: {{ r.aceite or '—' }}
+                {% if r.vulnerabilidade %}<br>Vulnerabilidade: {{ r.vulnerabilidade }}{% endif %}
+                {% if r.impacto_titular %}<br>Impacto ao titular: {{ r.impacto_titular }}{% endif %}
+              </div>
+            </span>
+          </div>
         {% endfor %}
       {% else %}{{ row("Riscos", "Não preenchido") }}{% endif %}
       {{ row("Medidas de mitigação", lista_para_texto(ripd.medidas_mitigacao)) }}
       {{ row("Riscos residuais", lista_para_texto(ripd.riscos_residuais)) }}
+      <form action="{{ url_for('ripd_sugerir_riscos', ripd_id=ripd.id) }}" method="post" class="mt-2">
+        <button class="btn btn-sm btn-outline-primary py-0 px-2" style="font-size:0.72rem;">
+          <i class="bi bi-magic"></i> Sugerir riscos típicos (matriz 5×5)
+        </button>
+      </form>
 
       <h6 class="sec-tit">6. Aprovação</h6>
       {{ row("Aprovado por (controlador)", ripd.aprovado_por) }}
@@ -97,6 +118,59 @@
       {{ row("Versão", ripd.versao) }}
       {{ row("Criado em", ripd.criado_em) }}
       {{ row("Atualizado em", ripd.atualizado_em) }}
+    </div>
+
+    <!-- Workflow de aprovação em etapas -->
+    <div class="bg-white border rounded p-3 mt-3" style="border-color:var(--tre-borda)!important;">
+      <h6 style="font-size:0.72rem;text-transform:uppercase;letter-spacing:.07em;
+                 color:var(--tre-azul);font-weight:700;margin-bottom:0.75rem;">
+        <i class="bi bi-diagram-3 me-1"></i> Aprovações em etapas
+      </h6>
+      {% if aprovacoes %}
+        {% for a in aprovacoes %}
+        <div class="detail-row">
+          <span class="detail-label">
+            {{ PAPEIS_APROVACAO|selectattr('0','equalto',a.papel)|map(attribute='1')|first if PAPEIS_APROVACAO is defined else a.papel }}
+            <span class="badge {{ {'pendente':'text-bg-warning text-dark','aprovado':'text-bg-success','reprovado':'text-bg-danger'}.get(a.status,'text-bg-secondary') }}" style="font-size:0.66rem;">
+              {{ {'pendente':'Pendente','aprovado':'Aprovado','reprovado':'Reprovado'}.get(a.status,a.status) }}
+            </span>
+          </span>
+          <span class="detail-value">
+            {{ a.comentario or '—' }}
+            {% if a.aprovador_nome %}<div style="font-size:0.72rem;color:#888;">por {{ a.aprovador_nome }} ({{ a.respondido_em }})</div>{% endif %}
+            {% if a.status == 'pendente' %}
+            <div class="d-flex gap-1 mt-1">
+              <form action="{{ url_for('ripd_aprovacao_responder', ripd_id=ripd.id, aprov_id=a.id) }}" method="post">
+                <input type="hidden" name="decisao" value="aprovar">
+                <input type="text" name="parecer" placeholder="Parecer (opcional)" class="form-control form-control-sm d-inline-block" style="width:180px;font-size:0.72rem;">
+                <button class="btn btn-sm btn-success py-0 px-2" style="font-size:0.7rem;">Aprovar</button>
+              </form>
+              <form action="{{ url_for('ripd_aprovacao_responder', ripd_id=ripd.id, aprov_id=a.id) }}" method="post">
+                <input type="hidden" name="decisao" value="reprovar">
+                <button class="btn btn-sm btn-outline-danger py-0 px-2" style="font-size:0.7rem;">Reprovar</button>
+              </form>
+              <form action="{{ url_for('ripd_aprovacao_excluir', ripd_id=ripd.id, aprov_id=a.id) }}" method="post"
+                    onsubmit="return confirm('Remover esta solicitação de aprovação?')">
+                <button class="btn btn-sm btn-outline-secondary py-0 px-2" style="font-size:0.7rem;">Remover</button>
+              </form>
+            </div>
+            {% endif %}
+          </span>
+        </div>
+        {% endfor %}
+      {% else %}
+        <p style="font-size:0.78rem;color:#aaa;margin:0;">Nenhuma aprovação em etapa solicitada.</p>
+      {% endif %}
+      <form action="{{ url_for('ripd_aprovacao_solicitar', ripd_id=ripd.id) }}" method="post" class="d-flex gap-2 mt-2 align-items-center">
+        <select name="papel" class="form-select form-select-sm" style="width:200px;font-size:0.75rem;">
+          <option value="">Papel de aprovação…</option>
+          {% for key, label in PAPEIS_APROVACAO %}
+          <option value="{{ key }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+        <input type="text" name="comentario" placeholder="Motivo (opcional)" class="form-control form-control-sm" style="font-size:0.75rem;">
+        <button class="btn btn-sm btn-outline-primary py-0 px-2" style="font-size:0.72rem;">Solicitar</button>
+      </form>
     </div>
   </div>
 

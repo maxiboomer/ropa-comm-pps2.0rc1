@@ -25,6 +25,10 @@ from modelo_ppsi import (
     lista_para_texto, dict_tipos_para_texto, dict_estimativa_para_texto,
     calcular_risco, SITUACOES_RIPD, PRINCIPIOS_LGPD, DIREITOS_TITULARES,
     CRITERIO_GERAL_LABELS, CRITERIO_ESPECIFICO_LABELS,
+    # Porte do repo `ropa` — matriz 5×5, gatilhos, sugestões, aprovações
+    nivel_risco, consolidar_risco, NIVEL_LABEL, NIVEL_COR, PROB_LABELS, IMPACTO_LABELS,
+    CATEGORIAS_RISCO, RISCOS_TIPICOS_POR_FATOR, SALVAGUARDAS_TIPICAS, TIPO_SALVAGUARDA_LABEL,
+    gatilhos_ripd, _fatores_atividade, sugerir_riscos, PAPEIS_APROVACAO, papel_label,
 )
 
 # ── ropa.py shared logic ──────────────────────────────────────────────────────
@@ -288,6 +292,15 @@ app.jinja_env.globals.update(
     DIREITOS_TITULARES=DIREITOS_TITULARES,
     CRITERIO_GERAL_LABELS=CRITERIO_GERAL_LABELS,
     CRITERIO_ESPECIFICO_LABELS=CRITERIO_ESPECIFICO_LABELS,
+    # Porte do repo `ropa` — matriz 5×5, gatilhos, sugestões, aprovações
+    nivel_risco=nivel_risco, consolidar_risco=consolidar_risco,
+    NIVEL_LABEL=NIVEL_LABEL, NIVEL_COR=NIVEL_COR,
+    PROB_LABELS=PROB_LABELS, IMPACTO_LABELS=IMPACTO_LABELS,
+    CATEGORIAS_RISCO=CATEGORIAS_RISCO,
+    RISCOS_TIPICOS_POR_FATOR=RISCOS_TIPICOS_POR_FATOR,
+    SALVAGUARDAS_TIPICAS=SALVAGUARDAS_TIPICAS, TIPO_SALVAGUARDA_LABEL=TIPO_SALVAGUARDA_LABEL,
+    gatilhos_ripd=gatilhos_ripd, sugerir_riscos=sugerir_riscos,
+    PAPEIS_APROVACAO=PAPEIS_APROVACAO, papel_label=papel_label,
     now=datetime.now,
 )
 
@@ -736,11 +749,16 @@ def ripd_ver(ripd_id):
         return redirect(url_for("listar"))
     atividade = get_atividade(ripd["atividade_id"]) or {}
     versoes_ripd = []
+    aprovacoes = []
     with get_conn() as conn:
         versoes_ripd = conn.execute(
             "SELECT * FROM versoes_ripd WHERE ripd_id=? ORDER BY id DESC LIMIT 30", (ripd_id,)
         ).fetchall()
-    return render_template("ripd_ver.html", ripd=ripd, atividade=atividade, versoes_ripd=versoes_ripd)
+        aprovacoes = conn.execute(
+            "SELECT * FROM ripd_aprovacoes WHERE ripd_id=? ORDER BY id DESC LIMIT 50", (ripd_id,)
+        ).fetchall()
+    return render_template("ripd_ver.html", ripd=ripd, atividade=atividade,
+                           versoes_ripd=versoes_ripd, aprovacoes=aprovacoes)
 
 
 @app.route("/ripds/<int:ripd_id>/editar", methods=["GET", "POST"])
@@ -801,6 +819,102 @@ def ripd_aprovar(ripd_id):
         conn.execute(f"UPDATE ripds SET {set_clause}, atualizado_em=:atualizado_em WHERE id=:id", novos)
     flash(f"RIPD aprovado (versão {nova_versao}).", "success")
     return redirect(url_for("ripd_ver", ripd_id=ripd_id))
+
+
+@app.route("/ripds/<int:ripd_id>/sugerir-riscos", methods=["POST"])
+@login_required
+def ripd_sugerir_riscos(ripd_id):
+    """Gera riscos típicos a partir dos fatores da atividade (matriz 5×5 ISO 27005).
+    Merge com riscos já preenchidos — não duplica ameaças existentes."""
+    ripd = get_ripd(ripd_id)
+    if not ripd:
+        flash("RIPD não encontrado.", "danger")
+        return redirect(url_for("listar"))
+    atividade = get_atividade(ripd["atividade_id"]) or {}
+    atuais = parse_json(ripd.get("riscos")) or []
+    if not isinstance(atuais, list):
+        atuais = []
+    existentes = {r.get("ameaca") for r in atuais if isinstance(r, dict)}
+    novos = []
+    for r in sugerir_riscos(atividade):
+        if r["ameaca"] in existentes:
+            continue
+        r["aceite"] = "não"  # novo risco ainda não aceite
+        novos.append(r)
+        existentes.add(r["ameaca"])
+    if not novos:
+        flash("Nenhum risco novo sugerido — os riscos típicos já estão preenchidos.", "warning")
+        return redirect(url_for("ripd_ver", ripd_id=ripd_id))
+    combinados = atuais + novos
+    with get_conn() as conn:
+        nova_versao = proxima_versao(ripd.get("versao"), False)
+        sintese = f"v{nova_versao} – sugestão de {len(novos)} risco(s) típico(s) via matriz 5×5"
+        novos_estado = {**ripd, "versao": nova_versao, "riscos": json.dumps(combinados, ensure_ascii=False),
+                        "atualizado_em": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "id": ripd_id}
+        _registrar_versao_ripd(conn, ripd_id, nova_versao, sintese,
+                               _snapshot_json(novos_estado), _responsavel_atual())
+        conn.execute("UPDATE ripds SET riscos=:riscos, versao=:versao, atualizado_em=:atualizado_em WHERE id=:id",
+                     novos_estado)
+    flash(f"{len(novos)} risco(s) sugerido(s) a partir dos fatores da atividade.", "success")
+    return redirect(url_for("ripd_ver", ripd_id=ripd_id))
+
+
+@app.route("/ripds/<int:ripd_id>/aprovacoes/solicitar", methods=["POST"])
+@login_required
+def ripd_aprovacao_solicitar(ripd_id):
+    """Abre uma solicitação de aprovação em etapa (papel) para o RIPD."""
+    ripd = get_ripd(ripd_id)
+    if not ripd:
+        flash("RIPD não encontrado.", "danger")
+        return redirect(url_for("listar"))
+    papel = request.form.get("papel", "").strip()
+    if papel not in dict(PAPEIS_APROVACAO):
+        flash("Papel de aprovação inválido.", "danger")
+        return redirect(url_for("ripd_ver", ripd_id=ripd_id))
+    comentario = request.form.get("comentario", "").strip()
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO ripd_aprovacoes (ripd_id, papel, status, comentario) VALUES (?,?,'pendente',?)",
+            (ripd_id, papel, comentario),
+        )
+    flash(f"Aprovação solicitada ao papel: {papel_label(papel)}.", "success")
+    return redirect(url_for("ripd_ver", ripd_id=ripd_id))
+
+
+@app.route("/ripds/<int:ripd_id>/aprovacoes/<int:aprov_id>/responder", methods=["POST"])
+@login_required
+def ripd_aprovacao_responder(ripd_id, aprov_id):
+    """Registra decisão (aprovar/reprovar) sobre uma solicitação de aprovação."""
+    decisao = request.form.get("decisao", "").strip()
+    if decisao not in ("aprovar", "reprovar"):
+        flash("Decisão inválida.", "danger")
+        return redirect(url_for("ripd_ver", ripd_id=ripd_id))
+    parecer = request.form.get("parecer", "").strip()
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM ripd_aprovacoes WHERE id=? AND ripd_id=?", (aprov_id, ripd_id)
+        ).fetchone()
+        if not row:
+            flash("Solicitação de aprovação não encontrada.", "danger")
+            return redirect(url_for("ripd_ver", ripd_id=ripd_id))
+        conn.execute(
+            "UPDATE ripd_aprovacoes SET status=?, aprovador_sub=?, aprovador_nome=?, "
+            "comentario=?, respondido_em=datetime('now','localtime') WHERE id=?",
+            ("aprovado" if decisao == "aprovar" else "reprovado",
+             _sub_atual(), _responsavel_atual(), parecer or row["comentario"], aprov_id),
+        )
+    flash("Decisão de aprovação registrada.", "success")
+    return redirect(url_for("ripd_ver", ripd_id=ripd_id))
+
+
+@app.route("/ripds/<int:ripd_id>/aprovacoes/<int:aprov_id>/excluir", methods=["POST"])
+@login_required
+def ripd_aprovacao_excluir(ripd_id, aprov_id):
+    with get_conn() as conn:
+        conn.execute("DELETE FROM ripd_aprovacoes WHERE id=? AND ripd_id=?", (aprov_id, ripd_id))
+    flash("Solicitação de aprovação removida.", "warning")
+    return redirect(url_for("ripd_ver", ripd_id=ripd_id))
+
 
 
 @app.route("/ripds/<int:ripd_id>/restaurar/<int:versao_id>", methods=["POST"])
@@ -1002,6 +1116,17 @@ def excluir(atividade_id):
         conn.execute("UPDATE atividades SET ativo=0 WHERE id=?", (atividade_id,))
     flash(f"Atividade #{atividade_id} removida.", "warning")
     return redirect(url_for("listar"))
+
+
+@app.route("/atividades/<int:atividade_id>/reabrir", methods=["POST"])
+@login_required
+def reabrir(atividade_id):
+    """Reabre uma atividade previamente descartada (soft-delete reversível)."""
+    with get_conn() as conn:
+        conn.execute("UPDATE atividades SET ativo=1 WHERE id=?", (atividade_id,))
+    flash(f"Atividade #{atividade_id} reaberta.", "success")
+    return redirect(url_for("ver", atividade_id=atividade_id))
+
 
 
 @app.route("/validar")
@@ -1533,6 +1658,12 @@ def _sintese_alteracoes(atual: dict, novos: dict) -> str:
 def _responsavel_atual() -> str:
     u = session.get("user", {}) or {}
     return u.get("name") or u.get("username") or "Web"
+
+
+def _sub_atual() -> str:
+    u = session.get("user", {}) or {}
+    return str(u.get("sub") or u.get("id") or u.get("username") or "anon")
+
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
