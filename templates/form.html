@@ -108,7 +108,7 @@
           <div class="form-check mb-2"><input class="form-check-input" type="checkbox" name="dados_sensiveis" id="dados_sensiveis" value="1" {% if atividade and atividade.dados_sensiveis %}checked{% endif %}><label class="form-check-label" for="dados_sensiveis" style="font-size:.82rem;">Envolve <strong>dados sensíveis</strong> (Art. 5º, II)</label></div>
           <div class="mb-3"><label class="form-label">Tipos de Dados Sensíveis</label>
             <div class="tag-input" data-target="tipos_dados_sensiveis"><input type="text" placeholder="Digite e pressione Enter para adicionar"></div>
-            <textarea name="tipos_dados_sensiveis" class="hidden-tags">{{ lista_para_texto(atividade.tipos_dados_sensiveis) if atividade else '' }}</textarea></div>
+            <textarea name="tipos_dados_sensiveis" id="tipos_dados_sensiveis" class="hidden-tags">{{ lista_para_texto(atividade.tipos_dados_sensiveis) if atividade else '' }}</textarea></div>
           <div class="pt-2" style="border-top:1px dashed #ddd;">
             <label class="form-label mb-2">Critérios de alto risco <small>(gatilho de RIPD — Res. CD/ANPD 2/2022)</small></label>
             {% set labels = {'tecnologias_emergentes':'Tecnologias emergentes/inovadoras','decisoes_automatizadas':'Decisões unicamente automatizadas (perfilamento)','vigilancia_zonas_publicas':'Vigilância/controle de zonas acessíveis ao público'} %}
@@ -129,7 +129,7 @@
             <textarea name="fluxo_tratamento" class="form-control form-control-sm" rows="3" placeholder="Coleta → processamento → armazenamento → compartilhamento → eliminação">{{ atividade.fluxo_tratamento if atividade else '' }}</textarea></div>
           <div class="mb-3"><label class="form-label">Origem dos Dados</label>
             <div class="tag-input" data-target="origem_dados"><input type="text" placeholder="Ex: formulário do titular. Enter para adicionar"></div>
-            <textarea name="origem_dados" class="hidden-tags">{{ lista_para_texto(atividade.origem_dados) if atividade else '' }}</textarea></div>
+            <textarea name="origem_dados" id="origem_dados" class="hidden-tags">{{ lista_para_texto(atividade.origem_dados) if atividade else '' }}</textarea></div>
           <div class="mb-3"><label class="form-label">Local e Meio de Armazenamento</label>
             <input type="text" name="local_armazenamento" class="form-control form-control-sm" value="{{ atividade.local_armazenamento if atividade else '' }}" placeholder="Ex: sistema corporativo X, nuvem corporativa, arquivo físico"></div>
           <div class="row g-2">
@@ -148,11 +148,11 @@
           <h6><i class="bi bi-people"></i> Agentes de Tratamento <span class="text-muted" style="text-transform:none;letter-spacing:0;font-weight:400;">(4.5)</span></h6>
           <div class="mb-3"><label class="form-label">Controladores</label>
             <div class="tag-input" data-target="controladores"><input type="text" placeholder="Razão social; CNPJ; responsabilidade. Enter para adicionar"></div>
-            <textarea name="controladores" class="hidden-tags">{{ lista_para_texto(atividade.controladores) if atividade else '' }}</textarea>
+            <textarea name="controladores" id="controladores" class="hidden-tags">{{ lista_para_texto(atividade.controladores) if atividade else '' }}</textarea>
             <div class="form-text">Em regra, o próprio órgão público é o controlador.</div></div>
           <div class="mb-0"><label class="form-label">Operadores</label>
             <div class="tag-input" data-target="operadores"><input type="text" placeholder="Razão social; CNPJ; instrumento. Enter para adicionar"></div>
-            <textarea name="operadores" class="hidden-tags">{{ lista_para_texto(atividade.operadores) if atividade else '' }}</textarea></div>
+            <textarea name="operadores" id="operadores" class="hidden-tags">{{ lista_para_texto(atividade.operadores) if atividade else '' }}</textarea></div>
         </div>
         <div class="d-flex justify-content-between"><button type="button" class="btn btn-outline-secondary" data-prev><i class="bi bi-arrow-left"></i> Voltar</button><button type="button" class="btn btn-tre" data-next>Próximo <i class="bi bi-arrow-right"></i></button></div>
       </div>
@@ -165,10 +165,10 @@
             <textarea name="destinatarios" class="form-control form-control-sm" rows="2" placeholder="Órgãos, sistemas ou terceiros com quem os dados são compartilhados...">{{ atividade.destinatarios if atividade else '' }}</textarea></div>
           <div class="mb-3"><label class="form-label">Compartilhamentos Detalhados</label>
             <div class="tag-input" data-target="compartilhamentos"><input type="text" placeholder="Órgão/sistema; finalidade; base. Enter para adicionar"></div>
-            <textarea name="compartilhamentos" class="hidden-tags">{{ lista_para_texto(atividade.compartilhamentos) if atividade else '' }}</textarea></div>
+            <textarea name="compartilhamentos" id="compartilhamentos" class="hidden-tags">{{ lista_para_texto(atividade.compartilhamentos) if atividade else '' }}</textarea></div>
           <div class="mb-0"><label class="form-label">Transferência Internacional</label>
             <div class="tag-input" data-target="transferencia_internacional"><input type="text" placeholder="país; destinatário; tipos; mecanismo. Enter para adicionar"></div>
-            <textarea name="transferencia_internacional" class="hidden-tags">{{ lista_para_texto(atividade.transferencia_internacional) if atividade else '' }}</textarea>
+            <textarea name="transferencia_internacional" id="transferencia_internacional" class="hidden-tags">{{ lista_para_texto(atividade.transferencia_internacional) if atividade else '' }}</textarea>
             <div class="form-text">Deixe vazio se não houver transferência internacional.</div></div>
         </div>
         <div class="d-flex justify-content-between"><button type="button" class="btn btn-outline-secondary" data-prev><i class="bi bi-arrow-left"></i> Voltar</button><button type="button" class="btn btn-tre" data-next>Próximo <i class="bi bi-arrow-right"></i></button></div>
@@ -251,7 +251,9 @@
   // Tag inputs
   function initTag(el){
     const hidden = document.getElementById(el.dataset.target);
+    if(!hidden) return;  // resiliente: se o textarea-alvo não existe, não quebra o resto do script
     const input = el.querySelector('input');
+    if(!input) return;
     function sync(){
       const tags=[...el.querySelectorAll('.chip')].map(c=>c.childNodes[0].textContent.trim());
       hidden.value=tags.join('\n');
