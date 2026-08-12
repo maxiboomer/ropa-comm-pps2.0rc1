@@ -26,6 +26,7 @@ from modelo_ppsi import (
     calcular_risco, SITUACOES_RIPD, PRINCIPIOS_LGPD, DIREITOS_TITULARES,
     CRITERIO_GERAL_LABELS, CRITERIO_ESPECIFICO_LABELS,
     CATEGORIAS_TITULARES_SUGERIDAS,
+    TIPOS_DADOS_POR_CATEGORIA_FCI, TIPOS_DADOS_SENSIVEIS_COMUNS,
     # Porte do repo `ropa` — matriz 5×5, gatilhos, sugestões, aprovações
     nivel_risco, consolidar_risco, NIVEL_LABEL, NIVEL_COR, PROB_LABELS, IMPACTO_LABELS,
     CATEGORIAS_RISCO, RISCOS_TIPICOS_POR_FATOR, SALVAGUARDAS_TIPICAS, TIPO_SALVAGUARDA_LABEL,
@@ -278,6 +279,8 @@ app.jinja_env.globals.update(
     SITUACOES=SITUACOES,
     CATEGORIAS_DADOS_FCI=CATEGORIAS_DADOS_FCI,
     CATEGORIAS_TITULARES_SUGERIDAS=CATEGORIAS_TITULARES_SUGERIDAS,
+    TIPOS_DADOS_POR_CATEGORIA_FCI=TIPOS_DADOS_POR_CATEGORIA_FCI,
+    TIPOS_DADOS_SENSIVEIS_COMUNS=TIPOS_DADOS_SENSIVEIS_COMUNS,
     ORGANIZACAO=ORGANIZACAO,
     UNIDADE=UNIDADE,
     ENCARREGADO=ENCARREGADO,
@@ -1595,6 +1598,16 @@ def _form_to_dict(form) -> dict:
         return json.dumps(parse_lista(texto), ensure_ascii=False)
 
     def _j_dict(texto):
+        # O editor de tipos FCI grava JSON {"categoria": [tipos]}; aceita também o
+        # formato legado "Categoria: tipo1; tipo2" por linha.
+        texto = (texto or "").strip()
+        if texto.startswith("{"):
+            try:
+                parsed = json.loads(texto)
+                if isinstance(parsed, dict):
+                    return json.dumps(parsed, ensure_ascii=False)
+            except Exception:
+                pass
         return json.dumps(parse_dict_tipos(texto), ensure_ascii=False)
 
     def _j_estimativa(texto):

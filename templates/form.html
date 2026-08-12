@@ -97,18 +97,45 @@
           <div class="mb-3"><label class="form-label">Tipos de Dados (resumo)</label>
             <textarea name="categorias_dados" class="form-control form-control-sm" rows="2" placeholder="Ex: nome, CPF, e-mail, endereço...">{{ atividade.categorias_dados if atividade else '' }}</textarea></div>
           <div class="mb-3"><label class="form-label">Tipos de Dados por Categoria (FCI-ANPD)</label>
-            <div class="d-flex gap-1 mb-1">
+            <div class="d-flex gap-2 align-items-center mb-2">
               <select class="form-select form-select-sm" id="catTiposSel">
-                {% for key,label in CATEGORIAS_DADOS_FCI.items() %}<option value="{{ label }}">{{ label }}</option>{% endfor %}
+                {% for key,label in CATEGORIAS_DADOS_FCI.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
               </select>
-              <button type="button" class="btn btn-sm btn-tre-soft text-nowrap" onclick="appendCat('tipos_dados','catTiposSel')">+ Categoria</button>
+              <button type="button" class="btn btn-sm btn-tre-soft text-nowrap" id="addCatTiposBtn"><i class="bi bi-plus-lg"></i> Adicionar categoria</button>
             </div>
-            <textarea name="tipos_dados" id="tipos_dados" class="form-control form-control-sm" rows="3" placeholder="Formato 'Categoria: tipo1; tipo2' por linha">{{ dict_tipos_para_texto(atividade.tipos_dados) if atividade else '' }}</textarea>
-            <div class="form-text">Use o botão <strong>+ Categoria</strong> e preencha os tipos após os dois pontos.</div></div>
+            <div id="catTiposWrap">
+              {% set _td = parse_json(atividade.tipos_dados) if atividade and atividade.tipos_dados else {} %}
+              {% if _td and _td is mapping %}
+                {% for key, tipos in _td.items() %}
+                {% set label = CATEGORIAS_DADOS_FCI.get(key, key) %}
+                {% set sugestoes = TIPOS_DADOS_POR_CATEGORIA_FCI.get(key, []) %}
+                <div class="cat-tipos card-ro mb-2 p-2" data-cat="{{ key }}" data-label="{{ label }}">
+                  <div class="d-flex justify-content-between align-items-center mb-1">
+                    <span style="font-size:.78rem;font-weight:700;">{{ label }}</span>
+                    <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1 cat-tipos-del"><i class="bi bi-x"></i></button>
+                  </div>
+                  <div class="d-flex flex-wrap gap-2">
+                    {% for t in sugestoes %}
+                    <div class="form-check"><input class="form-check-input cat-tipo-cb" type="checkbox" value="{{ t }}" {% if t in (tipos if tipos is iterable and tipos is not string else []) %}checked{% endif %}><label class="form-check-label" style="font-size:.75rem;">{{ t }}</label></div>
+                    {% endfor %}
+                  </div>
+                  <input type="text" class="form-control form-control-sm mt-1 cat-tipo-outro" value="{%- set _outros = [] -%}{%- for t in (tipos if tipos is iterable and tipos is not string else []) -%}{%- if t not in sugestoes -%}{%- if _outros.append(t) -%}{%- endif -%}{%- endif -%}{%- endfor -%}{{ _outros|join('; ') }}" placeholder="Outros tipos (separados por ;)">
+                </div>
+                {% endfor %}
+              {% endif %}
+            </div>
+            <textarea name="tipos_dados" id="tipos_dados" class="form-control form-control-sm d-none" rows="3">{{ dict_tipos_para_texto(atividade.tipos_dados) if atividade else '' }}</textarea>
+            <div class="form-text">Selecione a categoria FCI, escolha os tipos típicos e adicione os próprios (separados por <code>;</code>). Formatado automaticamente.</div></div>
           <div class="form-check mb-2"><input class="form-check-input" type="checkbox" name="dados_sensiveis" id="dados_sensiveis" value="1" {% if atividade and atividade.dados_sensiveis %}checked{% endif %}><label class="form-check-label" for="dados_sensiveis" style="font-size:.82rem;">Envolve <strong>dados sensíveis</strong> (Art. 5º, II)</label></div>
           <div class="mb-3"><label class="form-label">Tipos de Dados Sensíveis</label>
+            <div class="d-flex flex-wrap gap-2 mb-2">
+              {% for t in TIPOS_DADOS_SENSIVEIS_COMUNS %}
+              <div class="form-check"><input class="form-check-input" type="checkbox" data-sens-comum value="{{ t }}" id="sens_{{ loop.index }}" {% if atividade and t in parse_json(atividade.tipos_dados_sensiveis or '[]') %}checked{% endif %}><label class="form-check-label" for="sens_{{ loop.index }}" style="font-size:.75rem;">{{ t }}</label></div>
+              {% endfor %}
+            </div>
             <div class="tag-input" data-target="tipos_dados_sensiveis"><input type="text" placeholder="Digite e pressione Enter para adicionar"></div>
-            <textarea name="tipos_dados_sensiveis" id="tipos_dados_sensiveis" class="hidden-tags">{{ lista_para_texto(atividade.tipos_dados_sensiveis) if atividade else '' }}</textarea></div>
+            <textarea name="tipos_dados_sensiveis" id="tipos_dados_sensiveis" class="hidden-tags">{{ lista_para_texto(atividade.tipos_dados_sensiveis) if atividade else '' }}</textarea>
+            <div class="form-text">Marque os sensíveis comuns ou digite outros. Sensíveis ou <strong>crianças/idosos</strong> disparam o gatilho de RIPD automaticamente.</div></div>
           <div class="pt-2" style="border-top:1px dashed #ddd;">
             <label class="form-label mb-2">Critérios de alto risco <small>(gatilho de RIPD — Res. CD/ANPD 2/2022)</small></label>
             {% set labels = {'tecnologias_emergentes':'Tecnologias emergentes/inovadoras','decisoes_automatizadas':'Decisões unicamente automatizadas (perfilamento)','vigilancia_zonas_publicas':'Vigilância/controle de zonas acessíveis ao público'} %}
@@ -126,12 +153,25 @@
         <div class="form-card">
           <h6><i class="bi bi-arrow-repeat"></i> Ciclo de Vida dos Dados <span class="text-muted" style="text-transform:none;letter-spacing:0;font-weight:400;">(4.3)</span></h6>
           <div class="mb-3"><label class="form-label">Descrição do Fluxo de Tratamento</label>
-            <textarea name="fluxo_tratamento" class="form-control form-control-sm" rows="3" placeholder="Coleta → processamento → armazenamento → compartilhamento → eliminação">{{ atividade.fluxo_tratamento if atividade else '' }}</textarea></div>
+            <textarea name="fluxo_tratamento" class="form-control form-control-sm" rows="3" list="dlFluxo" placeholder="Coleta → processamento → armazenamento → compartilhamento → eliminação">{{ atividade.fluxo_tratamento if atividade else '' }}</textarea>
+            <datalist id="dlFluxo">
+              <option value="Coleta → processamento → armazenamento → compartilhamento → eliminação">
+              <option value="Coleta por formulário → cadastro em sistema → uso operacional → eliminação após prazo legal">
+              <option value="Coleta em ponto de atendimento → registro em processo eletrônico → consulta por área autorizada → expurgo conforme TTD">
+            </datalist></div>
           <div class="mb-3"><label class="form-label">Origem dos Dados</label>
             <div class="tag-input" data-target="origem_dados"><input type="text" placeholder="Ex: formulário do titular. Enter para adicionar"></div>
             <textarea name="origem_dados" id="origem_dados" class="hidden-tags">{{ lista_para_texto(atividade.origem_dados) if atividade else '' }}</textarea></div>
           <div class="mb-3"><label class="form-label">Local e Meio de Armazenamento</label>
-            <input type="text" name="local_armazenamento" class="form-control form-control-sm" value="{{ atividade.local_armazenamento if atividade else '' }}" placeholder="Ex: sistema corporativo X, nuvem corporativa, arquivo físico"></div>
+            <input type="text" name="local_armazenamento" class="form-control form-control-sm" list="dlLocal" value="{{ atividade.local_armazenamento if atividade else '' }}" placeholder="Ex: sistema corporativo X, nuvem corporativa, arquivo físico">
+            <datalist id="dlLocal">
+              <option value="Sistema corporativo (SEI)">
+              <option value="Banco de dados corporativo">
+              <option value="Nuvem corporativa">
+              <option value="Arquivo físico / pastas">
+              <option value="Sistema de protocolo eletrônico">
+              <option value="Planilha controlada (ambiente restrito)">
+            </datalist></div>
           <div class="row g-2">
             <div class="col-md-6"><label class="form-label">Prazo de Retenção</label><input type="text" name="prazo_retencao" class="form-control form-control-sm" value="{{ atividade.prazo_retencao if atividade else '' }}" placeholder="Ex: 5 anos após encerramento"></div>
             <div class="col-md-6"><label class="form-label">Frequência do Tratamento</label><input type="text" name="frequencia_tratamento" class="form-control form-control-sm" value="{{ atividade.frequencia_tratamento if atividade else '' }}" placeholder="Ex: contínua, mensal, eventual"></div>
@@ -228,6 +268,8 @@
 
 {% block scripts %}
 <script>
+  // Catálogo de tipos por categoria (injetado do backend) — usado pelo editor de tipos FCI
+  window.__TIPOS_DADOS_POR_CATEGORIA = {{ TIPOS_DADOS_POR_CATEGORIA_FCI|tojson }};
   // Wizard
   const steps = document.querySelectorAll('.wiz-step');
   const dots = document.querySelectorAll('.stepper .step');
@@ -285,6 +327,95 @@
     const line=cat+': ';
     ta.value = ta.value ? ta.value+'\n'+line : line;
     ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length);
+  }
+
+  // ── Tipos de dados por categoria (FCI) — checkboxes + sincronização ──
+  (function(){
+    const wrap=document.getElementById('catTiposWrap'); if(!wrap) return;
+    const hidden=document.getElementById('tipos_dados');
+    // mapa key->label de categorias
+    const CATLABEL={};
+    document.querySelectorAll('#catTiposSel option').forEach(o=>CATLABEL[o.value]=o.textContent);
+    // mapa key->lista de tipos típicos embutidos (via dataset não dá; usar JSON global)
+    const TIPOS=window.__TIPOS_DADOS_POR_CATEGORIA||{};
+    function syncCatTipos(){
+      const out={};
+      wrap.querySelectorAll('.cat-tipos').forEach(card=>{
+        const key=card.dataset.cat; const sel=[];
+        card.querySelectorAll('.cat-tipo-cb:checked').forEach(cb=>sel.push(cb.value));
+        const extra=(card.querySelector('.cat-tipo-outro').value||'').split(';').map(s=>s.trim()).filter(Boolean);
+        const all=[...new Set([...sel, ...extra])];
+        if(all.length) out[key]=all;
+      });
+      hidden.value=JSON.stringify(out);
+    }
+    function makeCard(key){
+      const label=CATLABEL[key]||key; const tipos=TIPOS[key]||[];
+      const d=document.createElement('div'); d.className='cat-tipos card-ro mb-2 p-2'; d.dataset.cat=key; d.dataset.label=label;
+      let cbHtml=tipos.map((t,i)=>`<div class="form-check"><input class="form-check-input cat-tipo-cb" type="checkbox" value="${t.replace(/"/g,'&quot;')}" id="ct_${key}_${i}"><label class="form-check-label" for="ct_${key}_${i}" style="font-size:.75rem;">${t}</label></div>`).join('');
+      d.innerHTML=`<div class="d-flex justify-content-between align-items-center mb-1"><span style="font-size:.78rem;font-weight:700;">${label}</span><button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1 cat-tipos-del"><i class="bi bi-x"></i></button></div><div class="d-flex flex-wrap gap-2">${cbHtml}</div><input type="text" class="form-control form-control-sm mt-1 cat-tipo-outro" placeholder="Outros tipos (separados por ;)">`;
+      wrap.appendChild(d);
+      d.querySelector('.cat-tipos-del').onclick=()=>{ d.remove(); syncCatTipos(); };
+      d.querySelectorAll('.cat-tipo-cb').forEach(cb=>cb.addEventListener('change',syncCatTipos));
+      d.querySelector('.cat-tipo-outro').addEventListener('input',syncCatTipos);
+      syncCatTipos();
+    }
+    document.getElementById('addCatTiposBtn').onclick=()=>{ const k=document.getElementById('catTiposSel').value; if(wrap.querySelector(`.cat-tipos[data-cat="${k}"]`)){alert('Categoria já adicionada.');return;} makeCard(k); };
+    wrap.querySelectorAll('.cat-tipos').forEach(card=>{
+      card.querySelector('.cat-tipos-del').onclick=()=>{ card.remove(); syncCatTipos(); };
+      card.querySelectorAll('.cat-tipo-cb').forEach(cb=>cb.addEventListener('change',syncCatTipos));
+      card.querySelector('.cat-tipo-outro').addEventListener('input',syncCatTipos);
+    });
+    syncCatTipos();
+  })();
+
+  // ── Tipos de dados sensíveis — sincronizar checkboxes comuns com tag-input ──
+  (function(){
+    const sensWrap=document.querySelector('input[data-sens-comum]')? document.querySelector('input[data-sens-comum]').parentElement.parentElement : null;
+    const tagSens=document.querySelector('.tag-input[data-target="tipos_dados_sensiveis"]');
+    if(!sensWrap||!tagSens) return;
+    const hidden=document.getElementById('tipos_dados_sensiveis');
+    function readSens(){ return (hidden.value||'').split('\n').map(s=>s.trim()).filter(Boolean); }
+    function writeSens(list){ hidden.value=[...new Set(list)].join('\n'); tagSens.querySelector('input') && syncSensChips(); }
+    function syncSensChips(){
+      // re-renderiza chips do tag-input a partir do hidden
+      const tags=[...tagSens.querySelectorAll('.chip')]; tags.forEach(c=>c.remove());
+      const input=tagSens.querySelector('input');
+      (hidden.value||'').split('\n').filter(s=>s.trim()).forEach(t=>{
+        const c=document.createElement('span'); c.className='chip'; c.appendChild(document.createTextNode(t.trim()));
+        const x=document.createElement('span'); x.className='x'; x.textContent='×'; x.onclick=()=>{c.remove(); const rest=[...tagSens.querySelectorAll('.chip')].map(q=>q.childNodes[0].textContent.trim()); writeSens(rest);};
+        c.appendChild(x); tagSens.insertBefore(c, input);
+      });
+      // atualiza checkboxes
+      const atuais=readSens();
+      document.querySelectorAll('input[data-sens-comum]').forEach(cb=>{ cb.checked = atuais.includes(cb.value); });
+    }
+    document.querySelectorAll('input[data-sens-comum]').forEach(cb=>cb.addEventListener('change',()=>{
+      const atuais=readSens();
+      if(cb.checked && !atuais.includes(cb.value)) atuais.push(cb.value);
+      if(!cb.checked && atuais.includes(cb.value)) atuais.splice(atuais.indexOf(cb.value),1);
+      writeSens(atuais);
+    }));
+    syncSensChips();
+  })();
+
+  // ── P5: auto-sugestões — base legal sensível marca dados sensíveis ──
+  (function(){
+    const base=document.querySelector('select[name=base_legal]'); if(!base) return;
+    const sens=document.getElementById('dados_sensiveis');
+    base.addEventListener('change',()=>{
+      const v=base.value||'';
+      if(v.startsWith('S-')){ // S-I, S-II — hipóteses de dados sensíveis
+        if(sens && !sens.checked){ sens.checked=true; flashNotice('Base legal de dados sensíveis — marcação automática de "dados sensíveis".'); }
+      }
+    });
+  })();
+  function flashNotice(msg){
+    const old=document.getElementById('wizNotice'); if(old) old.remove();
+    const d=document.createElement('div'); d.id='wizNotice'; d.className='alert alert-info alert-card py-2 mb-2'; d.style.cssText='font-size:.8rem;';
+    d.textContent=msg;
+    const first=document.querySelector('.wiz-step'); first && first.prepend(d);
+    setTimeout(()=>d.remove(), 6000);
   }
 
   // Estimativa de titulares — pares (categoria + quantidade)

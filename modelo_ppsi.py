@@ -33,6 +33,60 @@ CATEGORIAS_DADOS_FCI = {
     "outros":                        "Outros",
 }
 
+# ── Tipos de dados típicos por categoria FCI-ANPD (Guia 4.2.3) ──────────────
+# Usado para sugerir tipos ao selecionar uma categoria (checkboxes + campo livre).
+TIPOS_DADOS_POR_CATEGORIA_FCI = {
+    "dados_basicos_identificacao": [
+        "Nome completo", "Nome social", "Data de nascimento", "Sexo", "Nacionalidade",
+        "Naturalidade", "Estado civil", "Filiação", "Número de matrícula funcional",
+        "Número de registro geral (RG)", "CPF", "PIS/PASEP",
+    ],
+    "documentos_identificacao": [
+        "RG", "CPF", "Passaporte", "CNH", "Título de eleitor", "Certidão de nascimento",
+        "Certidão de casamento", "Carteira profissional", "Documento militar",
+    ],
+    "dados_contato": [
+        "Endereço residencial", "Endereço funcional", "Telefone", "Celular",
+        "E-mail pessoal", "E-mail funcional",
+    ],
+    "dados_financeiros": [
+        "Rendimentos", "Dados bancários", "Contracheque", "Dados de imposto de renda",
+        "Benefícios e auxílios", "Histórico de pagamentos", "Pensão alimentícia",
+    ],
+    "sigilo_legal_profissional": [
+        "Sigilo bancário", "Sigilo fiscal", "Sigilo médico", "Sigilo de correspondência",
+        "Sigilo de comunicações",
+    ],
+    "dados_autenticacao": [
+        "Login de usuário", "Senha", "Token de autenticação", "PIN", "Certificado digital",
+    ],
+    "imagem_voz_localizacao": [
+        "Fotografia", "Imagem de câmera", "Gravação de voz", "Vídeo",
+        "Localização geográfica", "Dados de geolocalização",
+    ],
+    "dados_biometricos": [
+        "Impressão digital", "Reconhecimento facial", "Íris", "Padrão de voz",
+        "Assinatura", "Dados genéticos", "Padrão de digitação",
+    ],
+    "dados_saude": [
+        "Histórico clínico", "Prontuário médico", "Resultado de exames", "Atestado médico",
+        "Diagnóstico", "Receita médica", "Dados de saúde ocupacional",
+    ],
+    "outros": [
+        "Categoria profissional", "Vínculo funcional", "Situação funcional", "Cargo e função",
+        "Comportamento em ambiente digital", "Preferências pessoais",
+    ],
+}
+
+# Tipos de dados sensíveis comuns (Art. 5º, II) — sugestão rápida
+TIPOS_DADOS_SENSIVEIS_COMUNS = [
+    "Origem racial ou étnica", "Convicção religiosa", "Opinião política",
+    "Filiação a sindicato ou organização religiosa/filosófica/política",
+    "Dados de saúde", "Dados biométricos", "Vida sexual",
+    "Dados genéticos",
+]
+
+
 # ── Titulares que demandam proteção reforçada (Guia 4.2.2) ───────────────────
 CATEGORIAS_PROTECAO_REFORCADA = [
     "criancas",
